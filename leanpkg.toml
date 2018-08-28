@@ -5,4 +5,5 @@ lean_version = "3.4.1"
 path = "src"
 
 [dependencies]
-mathlib = {git = "https://github.com/leanprover/mathlib", rev = "905345a2ceaa5d0c7bc2f6310026961416b2cae4"}
+mathlib = {git = "https://github.com/leanprover/mathlib", rev = "c52b317f85e63b47c6ade2b1aac5849ba904b4fa"}
+mathlib-nursery = {git = "https://github.com/leanprover-community/mathlib-nursery", rev = "9d807255297d360648ae35f01881572aa1dff6e8"}
