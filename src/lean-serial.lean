@@ -1,5 +1,6 @@
 
 import tactic
+import tactic.norm_num
 import category.liftable
 import category.basic
 import category.serial
@@ -41,7 +42,7 @@ def serial_inverse {α : Type u} (encode : α → put_m) (decode : get_m α) : P
 class serial (α : Type u) :=
   (encode : α → put_m.{u})
   (decode : get_m α)
-  (correctness : serial_inverse encode decode)
+  (correctness : ∀ w, decode -<< encode w = pure w)
 
 export serial (encode decode)
 
@@ -211,6 +212,11 @@ by { simp [there_and_back_again,(>>),seq_eq_bind_map] at *,
      rw [read_write_mono _ _ _ _ _ h',map_read_write],
      rw [ser_field,serial.correctness], subst w', refl }
 
+lemma encode_decode_bind [serial α]
+  (f : α → get_m β) (f' : punit → put_m) (w : α) :
+  (decode α >>= f) -<< (encode w >>= f') = f w -<< f' punit.star :=
+by { rw [read_write_mono]; rw serial.correctness; refl }
+
 @[simp]
 lemma encode_decode_map [serial α]
   (f : α → β) (y : γ → α) (w : γ) :
@@ -251,10 +257,10 @@ by { simp [valid_serializer,serial_inverse],
 --   valid_serializer (x <*> y) := _
 open ulift
 
-def ulift.encode [serial α] (w : ulift.{v} α) : put_m :=
+protected def ulift.encode [serial α] (w : ulift.{v} α) : put_m :=
 liftable1.up equiv.punit_equiv_punit (encode (down w))
 
-def ulift.decode [serial α] : get_m (ulift α) :=
+protected def ulift.decode [serial α] : get_m (ulift α) :=
 get_m.up ulift.up (decode α)
 
 instance [serial α] : serial (ulift.{v u} α) :=
@@ -319,10 +325,70 @@ begin
   cases w, refl
 end
 
+-- def constructor {α β γ} (w : unsigned) (f : α → option β)
+--   (ser : serializer β γ) : serializer α γ :=
+-- { encoder := _
+-- , decoder := _ }
+
+def write_word (w : unsigned) : put_m.{u} :=
+encode (up.{u} w)
+
+def read_word : get_m.{u} (ulift unsigned) :=
+decode _
+
+def select_tag' (tag : unsigned) : list (unsigned × get_m α) → get_m α
+| [] := get_m.fail
+| ((w,x) :: xs) := if w = tag then x else select_tag' xs
+
+def select_tag (xs : list (unsigned × get_m α)) : get_m α :=
+do w ← read_word,
+   select_tag' (down w) xs
+
+-- set_option pp.all true
+
+@[simp]
+lemma read_write_tag_hit (w w' : unsigned) (x : get_m α)
+  (xs : list (unsigned × get_m α)) (y : put_m)
+  (h : w = w') :
+  select_tag ( (w,x) :: xs ) -<< (write_word w' >> y) = x -<< y :=
+by subst w'; simp [select_tag,(>>),read_word,write_word,encode_decode_bind,select_tag']
+
+@[simp]
+lemma read_write_tag_miss (w w' : unsigned) (x : get_m α)
+  (xs : list (unsigned × get_m α)) (y : put_m)
+  (h : w ≠ w') :
+  select_tag ( (w,x) :: xs ) -<< (write_word w' >> y) = select_tag xs -<< (write_word w' >> y) :=
+by simp [select_tag,(>>),read_word,write_word,encode_decode_bind,select_tag',*]
+
+def sum.inl' {β : Type v} : ulift.{v} α → (α ⊕ β)
+| ⟨ x ⟩ := sum.inl x
+
+def sum.inr' {β : Type v} : ulift.{u} β → (α ⊕ β)
+| ⟨ x ⟩ := sum.inr x
+
 attribute [simp] serial.correctness
 
+def sum.encode {α β} [serial.{u} α] [serial.{v} β] : α ⊕ β → put_m.{max u v}
+| (sum.inl x) := write_word 1 >> encode (up.{v} x)
+| (sum.inr x) := write_word 2 >> encode (up.{u} x)
+
+def sum.decode {α β} [serial.{u} α] [serial.{v} β] : get_m (α ⊕ β) :=
+select_tag
+  [ (1,sum.inl' <$> decode _),
+    (2,sum.inr' <$> decode _) ]
+
+instance {β} [serial.{u} α] [serial.{v} β] : serial (α ⊕ β) :=
+{ encode := sum.encode,
+  decode := sum.decode,
+  correctness :=
+  by { rintro ⟨w⟩; simp [sum.encode,sum.decode,map_read_write,*], refl,
+       rw read_write_tag_miss, simp [map_read_write], refl, intro h, cases h, } }
+
 /- Todo:
-* sum
-* list
-* nat
+* instances
+   * [x] sum
+   * [ ] nat
+   * [ ] list
+   * [ ] tree
+* automate
 -/

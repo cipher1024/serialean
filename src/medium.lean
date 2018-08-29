@@ -123,7 +123,7 @@ def get_m.eval {α} : list unsigned → get_m α → option α
 | (w :: ws) _ := none
 
 
-def read_write : Π {α}, get_m α → put_m → option α
+def read_write : Π {α}, get_m.{u} α → put_m.{u} → option α
 | ._ (get_m.pure x) (put_m'.pure _) := some x
 | _ _ (put_m'.pure _) := none
 | ._ (get_m.read f) (put_m'.write w g) := read_write (f w) (g punit.star)
