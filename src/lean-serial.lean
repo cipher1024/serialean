@@ -1,93 +1,125 @@
 
-import tactic state
+import tactic
 import category.liftable
+import category.basic
+import category.serial
 import liftable
+import medium
 
 universes u v
 
-@[reducible]
-def put_m' (β : Type) (α : Type u) := α → state (ulift.{u} β) punit
-@[reducible]
-def get_m' (β : Type) := λ (α : Type u), state_t (ulift β) option α
+-- @[reducible]
+-- def put_m' (β : Type) (α : Type u) := α → state (ulift.{u} β) punit
+-- @[reducible]
+-- def get_m' (β : Type) := λ (α : Type u), state_t (ulift β) option α
 
-def serial_inverse {α} {β : Type u} (encode : put_m' α β) (decode : get_m' α β) : Prop :=
-∀ w, monad_state.lift (encode w) >> decode = pure w
+def serial_inverse {α : Type u} (encode : α → put_m) (decode : get_m α) : Prop :=
+∀ w, decode -<< encode w = pure w
 
-structure medium :=
-  (rep : Type)
-  (encode_word : put_m' rep unsigned)
-  (decode_word : get_m' rep unsigned)
-  (inverse : serial_inverse encode_word decode_word)
+-- structure medium :=
+--   (rep : Type)
+--   (encode_word : put_m' rep unsigned)
+--   (decode_word : get_m' rep unsigned)
+--   (inverse : serial_inverse encode_word decode_word)
 
-def medium.state (m : medium) := ulift m.rep
+-- def medium.state (m : medium) := ulift m.rep
 
-@[reducible]
-def put_m (m : medium) := put_m' m.rep
-@[reducible]
-def get_m (m : medium) := get_m' m.rep
+-- @[reducible]
+-- def put_m (m : medium) := put_m' m.rep
+-- @[reducible]
+-- def get_m (m : medium) := get_m' m.rep
 
-instance (m : medium) : monad (get_m m) :=
-by apply_instance
+-- instance (m : medium) : monad (get_m m) :=
+-- by apply_instance
 
-instance (m : medium) : is_lawful_monad (get_m m) :=
-by apply_instance
+-- instance (m : medium) : is_lawful_monad (get_m m) :=
+-- by apply_instance
 
-instance (m : medium) : liftable1 (get_m.{u} m) (get_m.{v} m) :=
-by apply_instance
+-- instance (m : medium) : liftable1 (get_m.{u} m) (get_m.{v} m) :=
+-- by apply_instance
 
 class serial (α : Type u) :=
-  (encode : Π m : medium, put_m m α)
-  (decode : Π m : medium, get_m m α)
-  (correctness : ∀ m : medium, serial_inverse (encode m) (decode m))
+  (encode : α → put_m.{u})
+  (decode : get_m α)
+  (correctness : serial_inverse encode decode)
 
 export serial (encode decode)
 
-structure serializer (α β : Type u) :=
+structure serializer (α : Type u) (β : Type u) :=
 intl ::
-(encoder : Π m : medium, put_m m α)
-(decoder : Π m : medium, get_m m β)
+(encoder : α → put_m.{u})
+(decoder : get_m β)
 
 def valid_serializer {α} (x : serializer α α) :=
-∀ m : medium, serial_inverse
-      (serializer.encoder x m)
-      (serializer.decoder x m)
+serial_inverse
+      (serializer.encoder x)
+      (serializer.decoder x)
 
 def apply {α β} : α → (α → β) → β :=
 λ x (f : α → β), f x
 
+lemma serializer.eq {α β} (x y : serializer α β)
+  (h : x.encoder = y.encoder)
+  (h' : x.decoder = y.decoder) :
+  x = y :=
+by cases x; cases y; congr; assumption
+
 namespace serializer.seq
 
-variables {α i j : Type u}
+variables {α : Type u} {i j : Type u}
 variables (x : serializer α (i → j))
 variables (y : serializer α i)
 
-def encoder (m : medium) := λ (k : α), x.encoder m k >> y.encoder m k
-def decoder (m : medium) := apply <$> y.decoder m <*> x.decoder m
+def encoder := λ (k : α), x.encoder k >> y.encoder k
+def decoder := x.decoder <*> y.decoder
 
 end serializer.seq
 
-instance {α : Type u} : applicative (serializer α) :=
-{ pure := λ i x, { encoder := λ _ _, return punit.star, decoder := λ k, pure x }
+instance {α : Type u} : applicative (serializer.{u} α) :=
+{ pure := λ i x, { encoder := λ _, return punit.star, decoder := pure x }
 , seq := λ i j x y,
   { encoder := serializer.seq.encoder x y
   , decoder := serializer.seq.decoder x y } }
 
-instance {α} : is_lawful_applicative (serializer α) :=
-begin
-  refine { .. }; dsimp; intros; casesm* serializer _ _;
-    simp [serializer.seq.encoder,serializer.seq.decoder];
-    split; ext,
-  all_goals
-  { simp [serializer.seq.encoder,serializer.seq.decoder,return,(>>),pure_bind,bind_pure,bind_assoc,pure_star,apply] with functor_norm },
-end
+section lawful_applicative
 
-def of_serializer {α} (s : serializer α α) (h : valid_serializer s) : serial α :=
-{ encode := s.encoder
-, decode := s.decoder
-, correctness := @h }
+variables {α β : Type u} {σ : Type u}
+
+@[simp]
+lemma decoder_pure (x : β) :
+  (pure x : serializer σ β).decoder = pure x := rfl
+
+@[simp]
+lemma decoder_map (f : α → β) (x : serializer σ α) :
+  (f <$> x).decoder = f <$> x.decoder := rfl
+
+@[simp]
+lemma decoder_seq (f : serializer σ (α → β)) (x : serializer σ α) :
+  (f <*> x).decoder = f.decoder <*> x.decoder := rfl
+
+@[simp]
+lemma encoder_pure (x : β) (w : σ) :
+  (pure x : serializer σ β).encoder w = pure punit.star := rfl
+
+@[simp]
+lemma encoder_map (f : α → β) (w : σ) (x : serializer σ α) :
+  (f <$> x : serializer σ β).encoder w = x.encoder w := rfl
+
+@[simp]
+lemma encoder_seq (f : serializer σ (α → β)) (x : serializer σ α) (w : σ) :
+  (f <*> x : serializer σ β).encoder w = f.encoder w >> x.encoder w := rfl
+
+end lawful_applicative
+
+instance {α} : is_lawful_functor (serializer.{u} α) :=
+by refine { .. }; intros; apply serializer.eq; try { ext }; simp [map_map]
+
+instance {α} : is_lawful_applicative (serializer.{u} α) :=
+by{  constructor; intros; apply serializer.eq; try { ext };
+     simp [(>>),pure_seq_eq_map,seq_assoc,bind_assoc],  }
 
 def ser_field {α β} [serial β] (f : α → β) : serializer α β :=
-{ encoder := λ inst x, @encode _ _ inst (f x)
+{ encoder := λ x, encode (f x)
 , decoder := @decode _ _ }
 
 -- @[simp]
@@ -112,82 +144,90 @@ open function
 
 variables {α β σ γ : Type u} {ω : Type}
 
-def there_and_back_again (m : medium)
-  (y : serializer γ α) (w : γ) : get_m m α :=
-monad_state.lift (y.encoder m w) >> y.decoder m
+def there_and_back_again
+  (y : serializer γ α) (w : γ) : option α :=
+y.decoder -<< y.encoder w
+
+-- @[simp]
+-- lemma decoder_pure (m : medium)
+--   (x : α) :
+--   (pure x : serializer γ α).decoder m = pure x := rfl
+
+-- @[simp]
+-- lemma decoder_seq (m : medium)
+--   (f : serializer σ (α → β)) (x : serializer σ α) :
+--   (f <*> x).decoder m = apply <$> x.decoder m <*> f.decoder m := rfl
+
+-- @[simp]
+-- lemma encoder_seq (m : medium)
+--   (f : serializer σ $ α → β) (x : serializer σ α) (w : σ) :
+--   (f <*> x).encoder m w = f.encoder m w >> x.encoder m w := rfl
+
+-- @[simp]
+-- lemma decoder_map (m : medium)
+--   (f : α → β) (x : serializer σ α) :
+--   (f <$> x).decoder m = f <$> x.decoder m :=
+-- by rw [← pure_seq_eq_map]; simp; simp [(∘),apply] with functor_norm
+
+-- @[simp]
+-- lemma encoder_map (m : medium)
+--   (f : α → β) (x : serializer σ α) :
+--   (f <$> x).encoder m = x.encoder m :=
+-- by { cases x, ext, simp! [functor.map,serializer.seq.encoder,(>>)] }
+
+-- @[simp]
+-- lemma encoder_field [serial β] (m : medium)
+--   (f : α → β) :
+--   (ser_field f).encoder m = λ w, encode _ m (f w) := rfl
+
+-- @[simp]
+-- lemma decoder_field [serial β] (m : medium)
+--   (f : α → β) :
+--   (ser_field f).decoder m = decode β m := rfl
+
+-- @[simp]
+-- lemma encode_decode_cancel [serial α] (m : medium)
+--   (x : α) (f : α → get_m m β) :
+-- do { monad_state.lift (encode α m x),
+--      decode α m >>= f } = f x :=
+-- by rw [← bind_assoc];
+--      apply bind_eq_of_eq_pure;
+--      [ apply serial.correctness,
+--        refl ]
+
+-- @[simp]
+-- lemma lift_encoder_bind {β}
+--   (encoder : put_m α) (rest : state m.state β) (x : α) :
+--   (monad_state.lift $ do { encoder x, rest } : get_m m _) =
+--   do { monad_state.lift (encoder x), monad_state.lift rest }  :=
+-- is_lawful_monad_state.lift_bind _ _
+
+lemma encode_decode_seq [serial α]
+  (x : serializer γ (α → β)) (f : α → β) (y : γ → α) (w : γ) (w' : β)
+  (h' : there_and_back_again x w = pure f)
+  (h  : w' = f (y w)) :
+  there_and_back_again (x <*> ser_field y) w = pure w' :=
+by { simp [there_and_back_again,(>>),seq_eq_bind_map] at *,
+     rw [read_write_mono _ _ _ _ _ h',map_read_write],
+     rw [ser_field,serial.correctness], subst w', refl }
 
 @[simp]
-lemma decoder_pure (m : medium)
-  (x : α) :
-  (pure x : serializer γ α).decoder m = pure x := rfl
+lemma encode_decode_map [serial α]
+  (f : α → β) (y : γ → α) (w : γ) :
+  there_and_back_again (f <$> ser_field y) w = pure (f $ y w) :=
+by rw [← pure_seq_eq_map,encode_decode_seq]; refl
 
 @[simp]
-lemma decoder_seq (m : medium)
-  (f : serializer σ (α → β)) (x : serializer σ α) :
-  (f <*> x).decoder m = apply <$> x.decoder m <*> f.decoder m := rfl
-
-@[simp]
-lemma encoder_seq (m : medium)
-  (f : serializer σ $ α → β) (x : serializer σ α) (w : σ) :
-  (f <*> x).encoder m w = f.encoder m w >> x.encoder m w := rfl
-
-@[simp]
-lemma decoder_map (m : medium)
-  (f : α → β) (x : serializer σ α) :
-  (f <$> x).decoder m = f <$> x.decoder m :=
-by rw [← pure_seq_eq_map]; simp; simp [(∘),apply] with functor_norm
-
-@[simp]
-lemma encoder_map (m : medium)
-  (f : α → β) (x : serializer σ α) :
-  (f <$> x).encoder m = x.encoder m :=
-by { cases x, ext, simp! [functor.map,serializer.seq.encoder,(>>)] }
-
-@[simp]
-lemma encoder_field [serial β] (m : medium)
-  (f : α → β) :
-  (ser_field f).encoder m = λ w, encode _ m (f w) := rfl
-
-@[simp]
-lemma decoder_field [serial β] (m : medium)
-  (f : α → β) :
-  (ser_field f).decoder m = decode β m := rfl
-
-@[simp]
-lemma encode_decode_cancel [serial α] (m : medium)
-  (x : α) (f : α → get_m m β) :
-do { monad_state.lift (encode α m x),
-     decode α m >>= f } = f x :=
-by rw [← bind_assoc];
-     apply bind_eq_of_eq_pure;
-     [ apply serial.correctness,
-       refl ]
-
-@[simp]
-lemma lift_encoder_bind {β} (m : medium)
-  (encoder : put_m m α) (rest : state m.state β) (x : α) :
-  (monad_state.lift $ do { encoder x, rest } : get_m m _) =
-  do { monad_state.lift (encoder x), monad_state.lift rest }  :=
-is_lawful_monad_state.lift_bind _ _
-
-@[simp]
-lemma encode_decode_seq [serial α] (m : medium)
-  (x : serializer γ (α → β)) (y : γ → α) (w : γ) :
-  there_and_back_again m (x <*> ser_field y) w =
-  there_and_back_again m x w <*> pure (y w) :=
-by simp [there_and_back_again,apply] with functor_norm
-
-@[simp]
-lemma encode_decode_pure (m : medium) (x : β) (w : γ) :
-  there_and_back_again m (pure x) w =
+lemma encode_decode_pure (x : β) (w : γ) :
+  there_and_back_again (pure x) w =
   pure x := rfl
 
-@[simp]
-lemma encode_decode_map [serial α] (m : medium)
-  (f : α → β) (y : γ → α) (w : γ) :
-  there_and_back_again m (f <$> ser_field y) w =
-  pure (f $ y w) :=
-by rw [← pure_seq_eq_map]; simp
+-- @[simp]
+-- lemma encode_decode_map [serial α] (m : medium)
+--   (f : α → β) (y : γ → α) (w : γ) :
+--   there_and_back_again m (f <$> ser_field y) w =
+--   pure (f $ y w) :=
+-- by rw [← pure_seq_eq_map]; simp
 
 -- @[simp]
 -- lemma encode_decode_map {γ α β : Type*} {ω} (m : medium ω) (σ₀ : ω)
@@ -202,7 +242,7 @@ by rw [← pure_seq_eq_map]; simp
 lemma valid_serializer_of_there_and_back_again
       {α : Type*} (y : serializer α α) :
   valid_serializer y ↔
-  ∀ (m : medium) (w : α), there_and_back_again m y w = pure w :=
+  ∀ (w : α), there_and_back_again y w = pure w :=
 by { simp [valid_serializer,serial_inverse],
      repeat { rw forall_congr, intro }, refl }
 
@@ -211,21 +251,33 @@ by { simp [valid_serializer,serial_inverse],
 --   valid_serializer (x <*> y) := _
 open ulift
 
-def ulift.encode [serial α] (m : medium) (w : ulift.{v} α) : state (ulift $ medium.rep m) punit :=
-liftable1.up equiv.punit_equiv_punit (encode _ m (down w))
+def ulift.encode [serial α] (w : ulift.{v} α) : put_m :=
+liftable1.up equiv.punit_equiv_punit (encode (down w))
 
-def ulift.decode [serial α] (m : medium) : get_m m (ulift α) :=
-liftable1.down equiv.ulift (decode α m)
+def ulift.decode [serial α] : get_m (ulift α) :=
+get_m.up ulift.up (decode α)
 
-instance [serial α] : serial (ulift α) :=
+instance [serial α] : serial (ulift.{v u} α) :=
 { encode := ulift.encode
 , decode := ulift.decode
-, correctness := by { introv _, simp [ulift.encode], rw monad_state_lift_liftable_up, simp [serial_inverse,monad_state_lift_liftable_up], rw monad_state_lift_liftable_up, apply medium.inverse } }
+, correctness :=
+  by { introv _, simp [ulift.encode,ulift.decode],
+       rw up_read_write' _ equiv.ulift.symm,
+       rw [serial.correctness], cases w, refl,
+       intro, refl } }
+
+def ser_field' {α β} [serial β] (f : α → β) : serializer.{max u v} α (ulift.{v} β) :=
+ser_field (up ∘ f)
 
 instance : serial unsigned :=
-{ encode := λ γ inst w, @medium.encode_word γ inst ⟨w⟩
-, decode := λ γ inst, ulift.down <$> @medium.decode_word γ inst
-, correctness := by { introv w, simp, rw medium.inverse, refl } }
+{ encode := λ w, put_m'.write w put_m'.pure
+, decode := get_m.read get_m.pure
+, correctness := by introv w; refl }
+
+def of_serializer {α} (s : serializer α α) (h : ∀ w, there_and_back_again s w = pure w) : serial α :=
+{ encode := s.encoder
+, decode := s.decoder
+, correctness := @h }
 
 structure point :=
 (x y : unsigned)
@@ -245,52 +297,32 @@ run_cmd add_interactive [`mk_serializer]
 end
 
 instance : serial point :=
-by mk_serializer (point.mk <$> ser_field point.x <*> ser_field point.y)
-open ulift
-
-def prod.mk' {β : Type v} : ulift α → ulift β → (α × β) := _
-
-instance {β : Type v} [serial α] [serial β] : serial (α × β) :=
-by mk_serializer (prod.mk' <$> ser_field (up prod.fst) <*> ser_field (up prod.snd))
-
-#check bind_pure
-attribute [simp] serial.correctness
-
-variables {m : Type* → Type*} [monad m]
-
-variables {α β γ φ : Type u}
-
-def compose (x : serial β γ) (y : serial α β) : serial α γ :=
-{ encode := λ i z, x.encode (y.encode i _) z
-, decode := _ -- y.decode <=< x.decode
-, correctness := by intros; simp [monad.pipe] }
-
-local infixr ` ∘ ` := compose
-
-variables (x : serial α β) (y : serial β γ) (z : serial γ φ)
-
-lemma compose_assoc :
-  z ∘ (y ∘ x) = (z ∘ y) ∘ x :=
+of_serializer (point.mk <$> ser_field point.x <*> ser_field point.y)
 begin
-  casesm* serial _ _, dsimp [compose], congr' 1,
-  ext, simp [(<=<),bind_assoc],
+  intro,
+  apply encode_decode_seq,
+  apply encode_decode_map,
+  cases w, refl
 end
 
-def serial_unsigned : serial unsigned (list unsigned) :=
-{ encode := list.ret
-, decode := λ xs, list.nth xs 0
-, correctness := by intros; simp!; refl }
+open ulift
 
-def serial_pair (x : serial α (list unsigned)) (y : serial β (list unsigned)) :
-  serial (α × β) (list unsigned) :=
-{ encode := λ i, x.encode i.1 ++ y.encode i.2
-, decode := _
-, correctness := _}
+def prod.mk' {β : Type v} : ulift α → ulift β → (α × β)
+| ⟨ x ⟩ ⟨ y ⟩ := (x,y)
 
-def serial_sum (x : serial α (list unsigned)) (y : serial β (list unsigned)) :
-  serial (α ⊕ β) (list unsigned) :=
-sorry -- implementation please!
+instance {β : Type v} [serial α] [serial β] : serial (α × β) :=
+of_serializer (prod.mk' <$> ser_field' prod.fst <*> ser_field'.{v u} prod.snd)
+begin
+  intro,
+  apply encode_decode_seq,
+  apply encode_decode_map,
+  cases w, refl
+end
 
-#eval serial_unsigned.encode 3
-#eval (serial_pair serial_unsigned serial_unsigned).encode (31,17)
-#eval (serial_sum serial_unsigned serial_unsigned).encode (sum.inl 31)
+attribute [simp] serial.correctness
+
+/- Todo:
+* sum
+* list
+* nat
+-/

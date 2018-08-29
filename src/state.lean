@@ -89,11 +89,6 @@ by { cases x; cases f; simp [has_seq.seq,pure,state_t.pure,state_t.bind,pure_bin
      congr, ext s, cases s, simp [state_t.bind._match_1,map_bind,state_t.exec] with functor_norm,
      congr, ext s', cases s', refl }
 
-@[simp]
-lemma pure_star {m} [applicative m] :
-  (λ (_x : punit), pure punit.star : punit → m punit) = pure :=
-by { ext, cases x, refl }
-
 lemma id_bind_def (x : id α) (f : α → id β) :
   x >>= f = f x := by simp [(>>=),id_bind]
 
@@ -121,11 +116,11 @@ by simp *
 
 attribute [functor_norm] bind_assoc has_bind.and_then map_bind
 
-lemma monad_state_lift_liftable_up (α') {σ' m'}
-  [functor m'] [is_lawful_functor m'] [liftable1 m' m]
-  [liftable σ' σ]
-  (cmd : state σ' α')
-  (Hα : α' ≃ α) :
-  (monad_state.lift $ liftable1.up Hα cmd : state_t σ m α) =
-  (liftable1.up Hα (monad_state.lift (cmd : state σ' α') : state_t σ' m' α')) :=
-sorry
+-- lemma monad_state_lift_liftable_up (α') {σ' m'}
+--   [functor m'] [is_lawful_functor m'] [liftable1 m' m]
+--   [liftable σ' σ]
+--   (cmd : state σ' α')
+--   (Hα : α' ≃ α) :
+--   (monad_state.lift $ liftable1.up Hα cmd : state_t σ m α) =
+--   (liftable1.up Hα (monad_state.lift (cmd : state σ' α') : state_t σ' m' α')) :=
+-- sorry
