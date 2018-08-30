@@ -523,6 +523,11 @@ begin
     rw read_write_mono_left _ _ _ _ w_ih, refl, }
 end }
 
+instance {p : Prop} [decidable p] : serial (plift p) :=
+{ encode := λ w, pure punit.star,
+  decode := if h : p then pure ⟨ h ⟩ else get_m.fail,
+  correctness := by { rintros ⟨ h ⟩, rw dif_pos h, refl } }
+
 
 /- Todo:
 * instances
