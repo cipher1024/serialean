@@ -276,6 +276,13 @@ begin
   simp [h],
 end
 
+lemma read_write_mono_left {α β} (i : α)
+      (x₀ : get_m α) (f₀ : α → get_m β)
+      (x₁ : put_m)
+      (h : x₀ -<< x₁ = some i) :
+  (x₀ >>= f₀) -<< x₁ = f₀ i -<< pure punit.star :=
+by rw ← read_write_mono _ x₀ f₀ x₁ pure h; simp
+
 lemma read_write_eq_eval_eval {α}
       (x₀ : get_m α) (x₁ : put_m)  :
   x₀ -<< x₁ = x₀.eval x₁.eval :=

@@ -1,5 +1,5 @@
 
-import tactic
+import tactic state
 import tactic.monotonicity
 import tactic.norm_num
 import category.liftable
@@ -502,13 +502,33 @@ begin
     { norm_num }, { norm_num } }
 end }
 
--- def list.
+def list.encode {α : Type u} [serial α] (xs : list α) : put_m.{u} :=
+encode (up.{u} xs.length) >> xs.mmap encode >> pure punit.star
+
+def list.decode {α : Type u} [serial α] : get_m.{u} (list α) :=
+do n ← decode _,
+   (list.iota $ down.{u} n).mmap $ λ _, decode α
+
+instance : serial1 list.{u} :=
+{ encode := @list.encode,
+  decode := @list.decode,
+  correctness :=
+begin
+  introsI,
+  simp [list.encode,list.decode,seq_left_eq,(>>)],
+  simp [bind_assoc,encode_decode_bind],
+  induction w,
+  { simp [nat.add_one,list.iota,mmap], refl },
+  { simp [nat.add_one,list.iota,mmap,encode_decode_bind] with functor_norm,
+    rw read_write_mono_left _ _ _ _ w_ih, refl, }
+end }
+
 
 /- Todo:
 * instances
    * [x] sum
    * [x] nat
-   * [ ] list
+   * [x] list
    * [ ] tree
 * automate
 -/
