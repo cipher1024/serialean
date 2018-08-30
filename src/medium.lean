@@ -36,20 +36,20 @@ inductive get_m : Type u → Type (u+1)
 | fail {α} : get_m α
 | pure {α} : α → get_m α
 | read {α} : (unsigned → get_m α) → get_m α
-| loop {α β γ : Type u} : β → (β → unsigned → get_m (α ⊕ β)) → (α → get_m γ) → get_m γ
+| loop {α β γ : Type u} : (β → unsigned → get_m (α ⊕ β)) → (α → get_m γ) → β → get_m γ
 
 def get_m.bind : Π {α β}, get_m α → (α → get_m β) → get_m β
 | _ _ (get_m.fail) _ := get_m.fail
 | _ _ (get_m.pure x)   f := f x
 | _ _ (get_m.read f) g := get_m.read $ λ w, get_m.bind (f w) g
-| _ _ (get_m.loop x₀ f g) h := get_m.loop x₀ f (λ r, get_m.bind (g r) h)
+| _ _ (get_m.loop f g x₀) h := get_m.loop f (λ r, get_m.bind (g r) h) x₀
 
 
 def get_m.map : Π {α β : Type u}, (α → β) → get_m α → get_m β
 | _ _ _ (get_m.fail) := get_m.fail
 | _ _ f (get_m.pure x) := get_m.pure $ f x
 | _ _ f (get_m.read g) := get_m.read $ λ w, get_m.map f (g w)
-| _ _ h (get_m.loop x₀ f g) := get_m.loop x₀ f (λ r, get_m.map h (g r))
+| _ _ h (get_m.loop f g x₀) := get_m.loop f (λ r, get_m.map h (g r)) x₀
 
 instance : functor get_m.{u} :=
 { map := @get_m.map }
@@ -113,13 +113,9 @@ def get_m.eval {α} : list unsigned → get_m α → option α
 | [] (get_m.pure x) := pure x
 | [] _  := none
 | (w :: ws) (get_m.read f) := get_m.eval ws (f w)
-| (w :: ws) (get_m.loop x₀ f g) :=
+| (w :: ws) (get_m.loop f g x₀) :=
   get_m.eval ws $
-  do { r ← f x₀ w,
-       match r with
-       | (sum.inr x₁) := get_m.loop x₁ f g
-       | (sum.inl r) := g r
-       end }
+  f x₀ w >>= @sum.rec _ _ (λ _, get_m α) g (get_m.loop f g)
 | (w :: ws) _ := none
 
 
@@ -127,25 +123,17 @@ def read_write : Π {α}, get_m.{u} α → put_m.{u} → option α
 | ._ (get_m.pure x) (put_m'.pure _) := some x
 | _ _ (put_m'.pure _) := none
 | ._ (get_m.read f) (put_m'.write w g) := read_write (f w) (g punit.star)
-| _ (@get_m.loop α β γ x₀ f g) (put_m'.write w h) :=
+| α (@get_m.loop α' β γ f g x₀) (put_m'.write w h) :=
   read_write
-    (do r ← f x₀ w,
-       match r with
-       | (sum.inr x₁) := get_m.loop x₁ f g
-       | (sum.inl r) := g r
-       end )
+    (f x₀ w >>= @sum.rec α' β (λ _, get_m α) g (get_m.loop f g))
     (h punit.star)
 | _ _ (put_m'.write w g) := none
 
 def read_write' : Π {α}, get_m α → put_m → option (α × put_m)
 | _ (get_m.read f) (put_m'.write w g) := read_write' (f w) (g punit.star)
-| _ (@get_m.loop α β γ x₀ f g) (put_m'.write w h) :=
+| α (@get_m.loop α' β γ f g x₀) (put_m'.write w h) :=
   read_write'
-    (do r ← f x₀ w,
-       match r with
-       | (sum.inr x₁) := get_m.loop x₁ f g
-       | (sum.inl r) := g r
-       end )
+    (f x₀ w >>= @sum.rec α' β (λ _, get_m α) g (get_m.loop f g))
     (h punit.star)
 -- | _ (get_m.pure x) m@(put_m'.write w g) := some (x,m)
 | _ (get_m.pure x) m := some (x,m)
@@ -158,7 +146,6 @@ lemma read_read_write_write {α} (x : get_m α) (m : put_m) (i : α) :
 begin
   induction m generalizing x;
   cases x; casesm* punit; simp [read_write,read_write',prod.ext_iff,pure,*],
-  apply iff_of_eq, congr,
 end
 
 def pipeline {α} (x : get_m α) (y : α → put_m) (i : α) : option α :=
@@ -206,12 +193,12 @@ lemma read_write_loop_bind {α β γ φ : Type u} (i : α)
       (body : α → unsigned → get_m (φ ⊕ α))
       (f₀ : φ → get_m β) (f₁ : β → get_m γ)
       (m : punit → put_m) (w : unsigned) :
-  (get_m.loop i body f₀ >>= f₁) -<<< put_m'.write w m =
-  (body i w >>= read_write'._match_1 _ _ _ body f₀ >>= f₁) -<<< m punit.star :=
+  (get_m.loop body f₀ i >>= f₁) -<<< put_m'.write w m =
+  (body i w >>= @sum.rec φ α (λ _, get_m β) f₀ (get_m.loop body f₀) >>= f₁) -<<< m punit.star :=
 begin
   rw bind_assoc,
   simp [(>>=),get_m.bind,read_write'],
-  congr, ext, cases x; simp [read_write'._match_1]; refl,
+  congr, ext, cases x; simp; refl,
 end
 
 -- lemma read_write_left_overs_bind {α} (i : α)
@@ -264,15 +251,16 @@ lemma read_write_mono' {α β} (i : α)
       (h : x₀ -<<< x₁ = some (i,x₂)) :
   (x₀ >>= f₀) -<<< x₁ = f₀ i -<<< x₂ :=
 begin
-  induction x₁ generalizing x₀;
+  -- simp [(>>=)],
+  induction x₁ generalizing x₀ f₀;
     try { cases x₀; cases h },
   { simp [(>>=),read_write',get_m.bind] },
   { cases x₀; try { cases h },
     simp [(>>=),read_write',get_m.bind] at h ⊢,
     simp [(>>=),read_write',get_m.bind] at h ⊢,
     { apply x₁_ih, assumption },
-    simp [read_write'] at h,
-    rw [read_write_loop_bind,x₁_ih _ _ h], }
+    simp [read_write_loop_bind,x₁_ih],
+    rw [x₁_ih _ _ _ h], }
 end
 
 lemma read_write_mono {α β} (i : α)
@@ -294,7 +282,7 @@ lemma read_write_eq_eval_eval {α}
 begin
   induction x₁ generalizing x₀; cases x₀; try { refl },
   simp! [*,read_write],
-  simp! [*,read_write], refl,
+  simp! [*,read_write],
 end
 open ulift
 
@@ -311,7 +299,7 @@ begin
   { cases x; refl },
   { cases x; simp [read_write]; try { refl };
     simp [get_m.bind,read_write,y_ih],
-    congr' 1, cases h : x_a_1 x_a y_a, refl,
+    congr' 1, cases h : x_a x_a_2 y_a, refl,
     cases a; refl,
     dsimp [(>>=),get_m.bind],
     congr, ext, simp [get_m.fold_bind],
@@ -327,21 +315,23 @@ def sum_ulift (α β : Type u) : (α ⊕ β) ≃ (ulift.{v} α ⊕ ulift.{v} β)
 -- | _ _ Heq (get_m.pure x) := get_m.pure $ Heq x
 -- | _ _ Heq (get_m.fail) := get_m.fail
 -- | _ _ Heq (get_m.read f) := get_m.read (λ w, get_m.up Heq (f w))
--- | _ β' Heq (@get_m.loop α β γ x f g) :=
---   get_m.loop (up.{v} x)
+-- | _ β' Heq (@get_m.loop α β γ f g x) :=
+--   get_m.loop
 --     (λ a b, get_m.up (sum_ulift α β) (f (down.{v} a) b))
 --     (λ w, get_m.up Heq (g $ down w))
+--     (up.{v} x)
 
 def get_m.up : Π {α : Type u} {β : Type.{max u v}} (Heq : α → β), get_m α → get_m β :=
 λ α β f x, (@get_m.rec_on (λ α _, Π β, (α → β) → get_m β) α x
 (λ α β f, get_m.fail)
 (λ α x β f, get_m.pure $ f x)
 (λ α next get_m_up β f, get_m.read $ λ w, get_m_up w _ f)
-(λ α β γ x₀ body rest get_m_up₀ get_m_up₁ β' f,
-  get_m.loop (up x₀)
+(λ α β γ body rest x₀ get_m_up₀ get_m_up₁ β' f,
+  get_m.loop
     (λ a b, get_m_up₀ (down a) b (ulift.{v} α ⊕ ulift.{v} β)
-                      (sum_ulift α β))
-    (λ r, get_m_up₁ (down r) _ f) )) β f
+                     (sum_ulift α β))
+    (λ r, get_m_up₁ (down r) _ f)
+    (up x₀)) β f)
 
 section eqns
 
@@ -355,10 +345,11 @@ variables {g' : γ → get_m α} {j : β'}
 @[simp] lemma get_m.up.eqn_2 : get_m.up Heq (get_m.fail) = get_m.fail := rfl
 @[simp] lemma get_m.up.eqn_3 : get_m.up Heq (get_m.read f) = get_m.read (λ w, get_m.up Heq (f w)) := rfl
 @[simp] lemma get_m.up.eqn_4 :
-  get_m.up Heq (get_m.loop j f' g') =
-  get_m.loop (up.{v} j)
+  get_m.up Heq (get_m.loop f' g' j) =
+  get_m.loop
     (λ a b, get_m.up (sum_ulift γ β') (f' (down.{v} a) b))
-    (λ w, get_m.up Heq (g' $ down w)) := rfl
+    (λ w, get_m.up Heq (g' $ down w))
+    (up.{v} j) := rfl
 
 end eqns
 
@@ -417,7 +408,7 @@ begin
       congr,
       { rw map_get_m_up, congr, ext, cases x; refl },
       simp [(∘)], ext, cases x;
-      dsimp [read_write._match_1,equiv.ulift_sum,sum.map], refl,
+      dsimp [equiv.ulift_sum,sum.map], refl,
       cases x, refl, apply_instance },
     congr,
 end

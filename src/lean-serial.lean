@@ -1,5 +1,6 @@
 
 import tactic
+import tactic.monotonicity
 import tactic.norm_num
 import category.liftable
 import category.basic
@@ -267,7 +268,7 @@ instance [serial α] : serial (ulift.{v u} α) :=
 { encode := ulift.encode
 , decode := ulift.decode
 , correctness :=
-  by { introv _, simp [ulift.encode,ulift.decode],
+  by { introv, simp [ulift.encode,ulift.decode],
        rw up_read_write' _ equiv.ulift.symm,
        rw [serial.correctness], cases w, refl,
        intro, refl } }
@@ -278,7 +279,7 @@ ser_field (up ∘ f)
 instance : serial unsigned :=
 { encode := λ w, put_m'.write w put_m'.pure
 , decode := get_m.read get_m.pure
-, correctness := by introv w; refl }
+, correctness := by introv; refl }
 
 def of_serializer {α} (s : serializer α α) (h : ∀ w, there_and_back_again s w = pure w) : serial α :=
 { encode := s.encoder
@@ -333,6 +334,17 @@ end
 def write_word (w : unsigned) : put_m.{u} :=
 encode (up.{u} w)
 
+@[simp] lemma loop_read_write_word {α β γ : Type u}
+  (w : unsigned) (x : α) (f : α → unsigned → get_m (β ⊕ α)) (g : β → get_m γ)
+  (rest : punit → put_m) :
+  get_m.loop f g x -<< (write_word w >>= rest) =
+  (f x w >>= @sum.rec _ _ (λ _, get_m γ) g (get_m.loop f g)) -<< rest punit.star := rfl
+
+@[simp] lemma loop_read_write_word' {α β γ : Type u}
+  (w : unsigned) (x : α) (f : α → unsigned → get_m (β ⊕ α)) (g : β → get_m γ)  :
+  get_m.loop f g x -<< (write_word w) =
+  (f x w >>= @sum.rec _ _ (λ _, get_m γ) g (get_m.loop f g)) -<< pure punit.star := rfl
+
 def read_word : get_m.{u} (ulift unsigned) :=
 decode _
 
@@ -384,10 +396,77 @@ instance {β} [serial.{u} α] [serial.{v} β] : serial (α ⊕ β) :=
   by { rintro ⟨w⟩; simp [sum.encode,sum.decode,map_read_write,*], refl,
        rw read_write_tag_miss, simp [map_read_write], refl, intro h, cases h, } }
 
+def word_sz : ℕ := unsigned_sz / 2
+
+def nat.encode : ℕ → put_m
+| n :=
+let r := n / word_sz,
+    w := n % word_sz in
+have h : 2 * w + 1 < unsigned_sz,
+  by { apply @lt_of_lt_of_le _ _ _ (2 * (w + 1)), simp [mul_add], norm_num,
+       transitivity 2 * word_sz,
+       { apply mul_le_mul, refl,
+         { apply nat.succ_le_of_lt, apply nat.mod_lt,
+           norm_num [word_sz,unsigned_sz,nat.succ_eq_add_one] },
+         apply nat.zero_le, apply nat.zero_le, },
+       { rw mul_comm, apply nat.div_mul_le_self } },
+if Hr : 1 ≤ r then
+  have h : 2 * w < unsigned_sz,
+    by { transitivity; [skip, assumption], apply nat.lt_succ_self } ,
+  have h'' : word_sz > 0,
+    by norm_num [word_sz,unsigned_sz,nat.succ_eq_add_one],
+  have h' : r < n,
+    by { apply nat.div_lt_self, rw [nat.le_div_iff_mul_le,one_mul] at Hr,
+         apply lt_of_lt_of_le h'' Hr, assumption,
+         norm_num [word_sz,unsigned_sz,nat.succ_eq_add_one] },
+  do write_word ⟨2 * w, h⟩,
+     nat.encode r
+else
+  write_word ⟨2 * w + 1, h⟩
+
+def nat.decode_aux (coef : ℕ × ℕ) (w : unsigned) : get_m (ℕ ⊕ (ℕ × ℕ)) :=
+let b := w.val % 2,
+    w' := w.val / 2,
+    c := coef.1,
+    coef' := (c * word_sz, c * w' + coef.2) in
+if b = 0 then pure (sum.inr coef')
+         else pure (sum.inl coef'.2)
+
+def nat.decode : get_m ℕ :=
+get_m.loop nat.decode_aux pure (1,0)
+
+instance : serial ℕ :=
+{ encode := nat.encode,
+  decode := nat.decode,
+  correctness :=
+begin
+  intro, dsimp [nat.decode],
+  suffices : get_m.loop nat.decode_aux pure (1, 0) -<< nat.encode w = pure (1 * w + 0),
+  { simp * },
+  generalize : 0 = k,
+  generalize : 1 = x,
+  induction w using nat.strong_induction_on generalizing x k,
+  rw [nat.encode], dsimp, split_ifs,
+  { simp [nat.decode_aux], rw w_a,
+    simp, congr,
+    rw [nat.mul_div_right,mul_assoc,← nat.left_distrib x,add_comm,nat.mod_add_div],
+    norm_num, apply nat.div_lt_self,
+    { by_contradiction, revert h,
+      apply not_lt_of_le, replace a := le_antisymm (le_of_not_lt a) (nat.zero_le _),
+      subst w_n, norm_num [word_sz], },
+    norm_num [word_sz,unsigned_sz,nat.succ_eq_add_one], },
+  { simp [nat.decode_aux], rw if_neg,
+    simp, simp [pure,read_write], congr, rw nat.add_mul_div_left,
+    norm_num, replace h := le_antisymm (le_of_not_lt h) (nat.zero_le _),
+    have := nat.mod_add_div w_n word_sz,
+    simp [h] at this, exact this,
+    { norm_num }, { norm_num } }
+end }
+
 /- Todo:
 * instances
    * [x] sum
-   * [ ] nat
+   * [x] nat
    * [ ] list
    * [ ] tree
 * automate
