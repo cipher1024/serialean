@@ -8,7 +8,7 @@ import category.serial
 import liftable
 import medium
 
-universes u v
+universes u v w
 
 -- @[reducible]
 -- def put_m' (β : Type) (α : Type u) := α → state (ulift.{u} β) punit
@@ -44,6 +44,31 @@ class serial (α : Type u) :=
   (encode : α → put_m.{u})
   (decode : get_m α)
   (correctness : ∀ w, decode -<< encode w = pure w)
+
+class serial1 (f : Type u → Type v) :=
+  (encode : Π {α} [serial α], f α → put_m.{v})
+  (decode : Π {α} [serial α], get_m (f α))
+  (correctness : ∀ {α} [serial α] (w : f α), decode -<< encode w = pure w)
+
+instance serial.serial1 {f α} [serial1 f] [serial α] : serial (f α) :=
+{ encode := λ x, serial1.encode x,
+  decode := serial1.decode f,
+  correctness := serial1.correctness }
+
+class serial2 (f : Type u → Type v → Type w) :=
+  (encode : Π {α β} [serial α] [serial β], f α β → put_m.{w})
+  (decode : Π {α β} [serial α] [serial β], get_m (f α β))
+  (correctness : ∀ {α β} [serial α] [serial β] (w : f α β), decode -<< encode w = pure w)
+
+instance serial.serial2 {f α β} [serial2 f] [serial α] [serial β] : serial (f α β) :=
+{ encode := λ x, serial2.encode x,
+  decode := serial2.decode f,
+  correctness := serial2.correctness }
+
+instance serial1.serial2 {f α} [serial2 f] [serial α] : serial1 (f α) :=
+{ encode := λ β inst x, @serial2.encode _ _ α β _ inst x,
+  decode := λ β inst, @serial2.decode f _ α β _ inst,
+  correctness := λ β inst, @serial2.correctness _ _ α β _ inst }
 
 export serial (encode decode)
 
@@ -286,6 +311,20 @@ def of_serializer {α} (s : serializer α α) (h : ∀ w, there_and_back_again s
 , decode := s.decoder
 , correctness := @h }
 
+def of_serializer₁ {f : Type u → Type v}
+  (s : Π α [serial α], serializer (f α) (f α))
+  (h : ∀ α [serial α] w, there_and_back_again (s α) w = pure w) : serial1 f :=
+{ encode := λ α inst, (@s α inst).encoder
+, decode := λ α inst, (@s α inst).decoder
+, correctness := @h }
+
+def of_serializer₂ {f : Type u → Type v → Type w}
+  (s : Π α β [serial α] [serial β], serializer (f α β) (f α β))
+  (h : ∀ α β [serial α] [serial β] w, there_and_back_again (s α β) w = pure w) : serial2 f :=
+{ encode := λ α β inst inst', (@s α β inst inst').encoder
+, decode := λ α β inst inst', (@s α β inst inst').decoder
+, correctness := @h }
+
 structure point :=
 (x y : unsigned)
 
@@ -317,10 +356,10 @@ open ulift
 def prod.mk' {β : Type v} : ulift α → ulift β → (α × β)
 | ⟨ x ⟩ ⟨ y ⟩ := (x,y)
 
-instance {β : Type v} [serial α] [serial β] : serial (α × β) :=
-of_serializer (prod.mk' <$> ser_field' prod.fst <*> ser_field'.{v u} prod.snd)
+instance : serial2 prod.{u v} :=
+of_serializer₂ (λ α β, by introsI; exact prod.mk' <$> ser_field' prod.fst <*> ser_field'.{v u} prod.snd)
 begin
-  intro,
+  intros,
   apply encode_decode_seq,
   apply encode_decode_map,
   cases w, refl
@@ -462,6 +501,8 @@ begin
     simp [h] at this, exact this,
     { norm_num }, { norm_num } }
 end }
+
+-- def list.
 
 /- Todo:
 * instances
