@@ -243,14 +243,24 @@ lemma encode_decode_bind [serial α]
   (decode α >>= f) -<< (encode w >>= f') = f w -<< f' punit.star :=
 by { rw [read_write_mono]; rw serial.correctness; refl }
 
+lemma encode_decode_bind' [serial α]
+  (f : α → get_m β) (w : α) :
+  (decode α >>= f) -<< (encode w) = f w -<< pure punit.star :=
+by { rw [read_write_mono_left]; rw serial.correctness; refl }
+
+lemma encode_decode_pure
+  (w w' : α) (u : punit) :
+  (pure w) -<< (pure u) = pure w' ↔ w = w' :=
+by split; intro h; cases h; refl
+
 @[simp]
-lemma encode_decode_map [serial α]
+lemma there_and_back_again_map [serial α]
   (f : α → β) (y : γ → α) (w : γ) :
   there_and_back_again (f <$> ser_field y) w = pure (f $ y w) :=
 by rw [← pure_seq_eq_map,encode_decode_seq]; refl
 
 @[simp]
-lemma encode_decode_pure (x : β) (w : γ) :
+lemma there_and_back_again_pure (x : β) (w : γ) :
   there_and_back_again (pure x) w =
   pure x := rfl
 
