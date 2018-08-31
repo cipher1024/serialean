@@ -82,9 +82,6 @@ serial_inverse
       (serializer.encoder x)
       (serializer.decoder x)
 
-def apply {α β} : α → (α → β) → β :=
-λ x (f : α → β), f x
-
 lemma serializer.eq {α β} (x y : serializer α β)
   (h : x.encoder = y.encoder)
   (h' : x.decoder = y.decoder) :
@@ -235,7 +232,7 @@ lemma there_and_back_again_seq [serial α]
   (h  : w' = f (y w)) :
   there_and_back_again (x <*> ser_field y) w = pure w' :=
 by { simp [there_and_back_again,(>>),seq_eq_bind_map] at *,
-     rw [read_write_mono _ _ _ _ _ h',map_read_write],
+     rw [read_write_mono h',map_read_write],
      rw [ser_field,serial.correctness], subst w', refl }
 
 lemma encode_decode_bind [serial α]
@@ -414,12 +411,26 @@ lemma read_write_tag_hit {w w' : unsigned} {x : get_m α}
   select_tag ( (w,x) :: xs ) -<< (write_word w' >> y) = x -<< y :=
 by subst w'; simp [select_tag,(>>),read_word,write_word,encode_decode_bind,select_tag']
 
+lemma read_write_tag_hit' {w w' : unsigned} {x : get_m α}
+  {xs : list (unsigned × get_m α)}
+  (h : w = w') :
+  select_tag ( (w,x) :: xs ) -<< (write_word w') = x -<< pure punit.star :=
+by subst w'; simp [select_tag,(>>),read_word,write_word,encode_decode_bind',select_tag']
+
 @[simp]
 lemma read_write_tag_miss {w w' : unsigned} {x : get_m α}
   {xs : list (unsigned × get_m α)} {y : put_m}
   (h : w ≠ w') :
   select_tag ( (w,x) :: xs ) -<< (write_word w' >> y) = select_tag xs -<< (write_word w' >> y) :=
 by simp [select_tag,(>>),read_word,write_word,encode_decode_bind,select_tag',*]
+
+def recursive_parser {α} : ℕ → (get_m α → get_m α) → get_m α
+| 0 _ := get_m.fail
+| (nat.succ n) rec_fn := rec_fn $ recursive_parser n rec_fn
+
+lemma recursive_parser_unfold {α} (n : ℕ) (f : get_m α → get_m α) (h : 1 ≤ n) :
+  recursive_parser n f = f (recursive_parser (n-1) f) :=
+by cases n; [ cases h, refl ]
 
 def sum.inl' {β : Type v} : ulift.{v} α → (α ⊕ β)
 | ⟨ x ⟩ := sum.inl x
@@ -530,7 +541,7 @@ begin
   induction w,
   { simp [nat.add_one,list.iota,mmap], refl },
   { simp [nat.add_one,list.iota,mmap,encode_decode_bind] with functor_norm,
-    rw read_write_mono_left _ _ _ _ w_ih, refl, }
+    rw read_write_mono_left w_ih, refl, }
 end }
 
 instance {p : Prop} [decidable p] : serial (plift p) :=
