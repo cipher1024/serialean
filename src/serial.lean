@@ -229,7 +229,7 @@ y.decoder -<< y.encoder w
 --   do { monad_state.lift (encoder x), monad_state.lift rest }  :=
 -- is_lawful_monad_state.lift_bind _ _
 
-lemma encode_decode_seq [serial α]
+lemma there_and_back_again_seq [serial α]
   (x : serializer γ (α → β)) (f : α → β) (y : γ → α) (w : γ) (w' : β)
   (h' : there_and_back_again x w = pure f)
   (h  : w' = f (y w)) :
@@ -257,7 +257,7 @@ by split; intro h; cases h; refl
 lemma there_and_back_again_map [serial α]
   (f : α → β) (y : γ → α) (w : γ) :
   there_and_back_again (f <$> ser_field y) w = pure (f $ y w) :=
-by rw [← pure_seq_eq_map,encode_decode_seq]; refl
+by rw [← pure_seq_eq_map,there_and_back_again_seq]; refl
 
 @[simp]
 lemma there_and_back_again_pure (x : β) (w : γ) :
@@ -356,8 +356,8 @@ instance : serial point :=
 of_serializer (point.mk <$> ser_field point.x <*> ser_field point.y)
 begin
   intro,
-  apply encode_decode_seq,
-  apply encode_decode_map,
+  apply there_and_back_again_seq,
+  apply there_and_back_again_map,
   cases w, refl
 end
 
@@ -370,8 +370,8 @@ instance : serial2 prod.{u v} :=
 of_serializer₂ (λ α β, by introsI; exact prod.mk' <$> ser_field' prod.fst <*> ser_field'.{v u} prod.snd)
 begin
   intros,
-  apply encode_decode_seq,
-  apply encode_decode_map,
+  apply there_and_back_again_seq,
+  apply there_and_back_again_map,
   cases w, refl
 end
 
@@ -408,15 +408,15 @@ do w ← read_word,
 -- set_option pp.all true
 
 @[simp]
-lemma read_write_tag_hit (w w' : unsigned) (x : get_m α)
-  (xs : list (unsigned × get_m α)) (y : put_m)
+lemma read_write_tag_hit {w w' : unsigned} {x : get_m α}
+  {xs : list (unsigned × get_m α)} {y : put_m}
   (h : w = w') :
   select_tag ( (w,x) :: xs ) -<< (write_word w' >> y) = x -<< y :=
 by subst w'; simp [select_tag,(>>),read_word,write_word,encode_decode_bind,select_tag']
 
 @[simp]
-lemma read_write_tag_miss (w w' : unsigned) (x : get_m α)
-  (xs : list (unsigned × get_m α)) (y : put_m)
+lemma read_write_tag_miss {w w' : unsigned} {x : get_m α}
+  {xs : list (unsigned × get_m α)} {y : put_m}
   (h : w ≠ w') :
   select_tag ( (w,x) :: xs ) -<< (write_word w' >> y) = select_tag xs -<< (write_word w' >> y) :=
 by simp [select_tag,(>>),read_word,write_word,encode_decode_bind,select_tag',*]
@@ -537,7 +537,6 @@ instance {p : Prop} [decidable p] : serial (plift p) :=
 { encode := λ w, pure punit.star,
   decode := if h : p then pure ⟨ h ⟩ else get_m.fail,
   correctness := by { rintros ⟨ h ⟩, rw dif_pos h, refl } }
-
 
 /- Todo:
 * instances
