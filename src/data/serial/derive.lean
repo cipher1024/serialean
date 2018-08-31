@@ -1,6 +1,6 @@
 
 import tactic.monotonicity
-import serial
+import data.serial.basic
 import data.nat.serial
 import tactic.serial
 import tactic.norm_num

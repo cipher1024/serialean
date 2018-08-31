@@ -2,7 +2,7 @@
 import tactic
 import logic.basic
 import category.liftable
-import liftable
+import category.liftable.serial
 
 universes u v
 

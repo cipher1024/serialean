@@ -1,12 +1,10 @@
 
-import tactic state
+import tactic
 import tactic.monotonicity
 import tactic.norm_num
-import category.liftable
 import category.basic
 import category.serial
-import liftable
-import medium
+import data.serial.medium
 
 universes u v w
 
