@@ -44,7 +44,6 @@ def get_m.bind : Π {α β}, get_m α → (α → get_m β) → get_m β
 | _ _ (get_m.read f) g := get_m.read $ λ w, get_m.bind (f w) g
 | _ _ (get_m.loop f g x₀) h := get_m.loop f (λ r, get_m.bind (g r) h) x₀
 
-
 def get_m.map : Π {α β : Type u}, (α → β) → get_m α → get_m β
 | _ _ _ (get_m.fail) := get_m.fail
 | _ _ f (get_m.pure x) := get_m.pure $ f x
@@ -57,57 +56,34 @@ instance : functor get_m.{u} :=
 def get_m.seq {α β : Type u} : Π (f : get_m (α → β)) (x : get_m α), get_m β :=
 λ (f : get_m (α → β)) (x : get_m α), get_m.bind f (λ f, f <$> x)
 
-instance : applicative get_m :=
-{ to_functor := get_m.functor
-, pure := λ α, get_m.pure
-, seq := @get_m.seq }
+-- instance : applicative get_m :=
+-- { to_functor := get_m.functor
+-- , pure := λ α, get_m.pure
+-- , seq := @get_m.seq }
 open function
 
-
--- lemma get_m.seq_assoc {α β γ : Type u} (x : get_m α) (g : get_m (α → β)) (h : get_m (β → γ)) :
---   h <*> (g <*> x) = (@comp α β γ <$> h) <*> g <*> x :=
--- begin
---   refine get_m.rec_on h _ _ _ _; intros; dsimp [(<*>),(<$>),get_m.seq,get_m.bind],
---   erw get_m.bind,
---   change get_m.fail = _,
---   refl, dunfold get_m.bind,
--- end
-
-instance : is_lawful_functor get_m :=
-sorry
--- by { constructor; intros;
---      dsimp [(<$>),get_m.seq];
---      induction x;
---      try { refl };
---      simp [get_m.bind,get_m.seq,*]; ext, rw x_ih, }
-
-instance : is_lawful_applicative get_m :=
-sorry
--- by { constructor; intros; dsimp [(<*>),pure,(<$>),get_m.seq]; try { refl },
---        -- refl },
---      simp [get_m.bind],
---      induction g generalizing h x, simp [get_m.bind,(∘)], refl,
---      }
+instance : is_lawful_functor.{u} get_m :=
+by { constructor; intros;
+     dsimp [(<$>),get_m.seq];
+     induction x;
+     try { refl };
+     simp [get_m.map,*]; ext }
 
 instance : monad get_m :=
-{ to_applicative := get_m.applicative
+{ to_functor := get_m.functor
+, pure := @get_m.pure
 , bind := @get_m.bind }
 
-instance : is_lawful_monad get_m :=
-sorry
--- { is_lawful_monad . bind_assoc := by { intros, dsimp, refl },
---   pure_bind := by { intros, dsimp, refl },
---   bind_pure_comp_eq_map := by { intros, dsimp, refl },
---   bind_map_eq_seq := by { intros, dsimp, refl },
---   pure_seq_eq_map := by { intros, dsimp, refl },
---   map_pure := by { intros, dsimp, refl },
---   seq_pure := by { intros, dsimp, refl },
---   seq_assoc := by { intros, dsimp, refl } }
--- by { constructor; intros; dsimp [(>>=)],
---      refl,
---      induction x; try { refl };
---      dsimp [(>>=),get_m.bind];
---      try { refl }; congr; simp * }
+instance : is_lawful_monad get_m.{u} :=
+{ to_is_lawful_functor := get_m.is_lawful_functor,
+  bind_assoc := by { intros, dsimp [(>>=)],
+                     induction x; try { refl }; simp [get_m.bind,*], },
+  bind_pure_comp_eq_map := by { intros, dsimp [(>>=),(<$>)],
+                                induction x; try {refl}; simp [get_m.bind,get_m.map,*], },
+  map_pure := by intros; refl,
+  pure_seq_eq_map := by { intros, dsimp [(>>=),(<$>)],
+                          induction x; try {refl}; simp [get_m.bind,get_m.map,*], },
+  pure_bind := by intros; refl }
 
 def get_m.eval {α} : list unsigned → get_m α → option α
 | [] (get_m.pure x) := pure x
