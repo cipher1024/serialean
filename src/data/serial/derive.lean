@@ -7,8 +7,9 @@ import tactic.norm_num
 import tactic.basic
 import category.basic
 
-section tactic
+namespace tactic
 
+open serial
 open tactic
 open tactic.interactive (unfold norm_num trivial simp ac_mono)
 open interactive
@@ -227,20 +228,3 @@ do tgt ← target,
 instance_derive_handler ``serial mk_serial_instance
 
 end tactic
-
-@[derive serial]
-inductive my_sum
-| first : my_sum
-| second : ℕ → my_sum
-| third (n : ℕ) (xs : list ℕ) : n ≤ xs.length → my_sum
-
-@[derive serial]
-structure my_struct :=
-(x : ℕ)
-(xs : list ℕ)
-(bounded : xs.length ≤ x)
-
-@[derive serial]
-inductive tree (α : Type)
-| leaf : tree
-| node2 : α → tree → tree → tree
